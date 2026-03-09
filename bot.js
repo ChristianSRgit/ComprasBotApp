@@ -25,7 +25,7 @@ async function syncData() {
         if (!arr || !Array.isArray(arr)) return [];
         return arr.filter(row => {
           const val = Array.isArray(row) ? row[0] : row;
-          return val !== 'Nombre' && val !== 'Item';
+          return val && val !== 'Nombre' && val !== 'Item';
         });
       };
       allSuppliers = cleanData(response.data.suppliers);
@@ -50,13 +50,17 @@ const purchaseWizard = new Scenes.WizardScene(
   },
   // 2. Supplier
   async (ctx) => {
-    if (ctx.message.text.startsWith('/')) return ctx.scene.leave();
-    const selectedCategory = ctx.message.text;
+    const text = ctx.message?.text;
+    if (!text || text.startsWith('/')) {
+      await ctx.scene.leave();
+      return; 
+    }
+    
+    const selectedCategory = text;
     ctx.wizard.state.purchase.category = selectedCategory;
     
     const filteredSuppliers = allSuppliers
       .filter(s => {
-        const name = Array.isArray(s) ? s[0] : s;
         const cat = Array.isArray(s) ? s[1] : null;
         if (!cat) return true;
         const itemCategories = cat.toString().split(',').map(c => c.trim().toLowerCase());
@@ -74,8 +78,13 @@ const purchaseWizard = new Scenes.WizardScene(
   },
   // 3. Item
   async (ctx) => {
-    if (ctx.message.text.startsWith('/')) return ctx.scene.leave();
-    const supplier = ctx.message.text;
+    const text = ctx.message?.text;
+    if (!text || text.startsWith('/')) {
+      await ctx.scene.leave();
+      return;
+    }
+    
+    const supplier = text;
     ctx.wizard.state.purchase.supplier = supplier;
 
     const filteredItems = allItems
@@ -95,15 +104,23 @@ const purchaseWizard = new Scenes.WizardScene(
   },
   // 4. Quantity
   async (ctx) => {
-    if (ctx.message.text.startsWith('/')) return ctx.scene.leave();
-    ctx.wizard.state.purchase.item = ctx.message.text;
+    const text = ctx.message?.text;
+    if (!text || text.startsWith('/')) {
+      await ctx.scene.leave();
+      return;
+    }
+    ctx.wizard.state.purchase.item = text;
     await ctx.reply('🔢 ¿CANTIDAD?');
     return ctx.wizard.next();
   },
   // 5. Price
   async (ctx) => {
-    if (ctx.message.text.startsWith('/')) return ctx.scene.leave();
-    const input = ctx.message.text.replace(/[^0-9.,]/g, '').replace(',', '.');
+    const text = ctx.message?.text;
+    if (!text || text.startsWith('/')) {
+      await ctx.scene.leave();
+      return;
+    }
+    const input = text.replace(/[^0-9.,]/g, '').replace(',', '.');
     if (isNaN(input) || input === '') return ctx.reply('⚠️ Ingresa un NÚMERO.');
     ctx.wizard.state.purchase.quantity = input;
     await ctx.reply('💰 ¿PRECIO TOTAL por unidad?');
@@ -111,8 +128,12 @@ const purchaseWizard = new Scenes.WizardScene(
   },
   // 6. Confirm Step 1
   async (ctx) => {
-    if (ctx.message.text.startsWith('/')) return ctx.scene.leave();
-    const input = ctx.message.text.replace(/[^0-9.,]/g, '').replace(',', '.');
+    const text = ctx.message?.text;
+    if (!text || text.startsWith('/')) {
+      await ctx.scene.leave();
+      return;
+    }
+    const input = text.replace(/[^0-9.,]/g, '').replace(',', '.');
     if (isNaN(input) || input === '') return ctx.reply('⚠️ Ingresa un NÚMERO.');
     ctx.wizard.state.purchase.price = input;
     const p = ctx.wizard.state.purchase;
@@ -124,7 +145,7 @@ const purchaseWizard = new Scenes.WizardScene(
   },
   // 7. Save to Sheets
   async (ctx) => {
-    const answer = ctx.message.text;
+    const answer = ctx.message?.text;
     if (answer === '✅ SI') {
       const data = ctx.wizard.state.purchase;
       await ctx.reply('⏳ Guardando...', Markup.removeKeyboard());
@@ -136,7 +157,7 @@ const purchaseWizard = new Scenes.WizardScene(
         await ctx.reply('❌ Error al guardar en Sheets.');
       }
     } else {
-      await ctx.reply('❌ Compra cancelada.', Markup.removeKeyboard());
+      await ctx.reply('❌ Compra cancelada o comando recibido.', Markup.removeKeyboard());
     }
     return ctx.scene.leave();
   }
@@ -146,8 +167,12 @@ const stage = new Scenes.Stage([purchaseWizard]);
 bot.use(session());
 bot.use(stage.middleware());
 
+// Global Commands (Handled after stage, but scene will exit if / is detected)
 bot.command('start', (ctx) => ctx.reply('👋 Usa /new para registrar o /sync para actualizar.'));
-bot.command('reset', (ctx) => { ctx.scene.leave(); ctx.reply('🔄 Sesión reiniciada.'); });
+bot.command('reset', async (ctx) => { 
+  await ctx.scene?.leave(); 
+  await ctx.reply('🔄 Sesión reiniciada.'); 
+});
 bot.command('ping', (ctx) => ctx.reply('pong!'));
 bot.command('new', (ctx) => ctx.scene.enter('PURCHASE_WIZARD'));
 bot.command('sync', async (ctx) => {
