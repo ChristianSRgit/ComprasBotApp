@@ -1,4 +1,4 @@
-const { Telegraf, Scenes, Markup } = require('telegraf');
+const { Telegraf, Scenes, Markup, session } = require('telegraf');
 const LocalSession = require('telegraf-session-local');
 const axios = require('axios');
 
