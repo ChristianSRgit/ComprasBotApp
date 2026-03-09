@@ -12,25 +12,16 @@ const chunk = (arr, size) =>
 
 const HARDCODED_CATEGORIES = ['Carne', 'verduleria', 'panaderia', 'lacteos', 'congelados', 'aderezos', 'packaging', 'grafica', 'marketing', 'publicidad', 'envios', 'insumos_cocina', 'limpieza', 'Luz', 'Agua', 'Gas', 'Internet', 'ServicioExterno', 'Online', 'Otros'];    
 let categories = HARDCODED_CATEGORIES;
-let allSuppliers = [];
-let allItems = [];
+let masterData = []; // [[Nombre, Categoria, Items], ...]
 
 async function syncData() {
   if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes('your_google_apps_script')) return;
-  console.log('Sincronizando datos desde Sheets...');
+  console.log('Sincronizando desde MAESTRO...');
   try {
     const response = await axios.get(APPS_SCRIPT_URL);
-    if (response.data) {
-      const cleanData = (arr) => {
-        if (!arr || !Array.isArray(arr)) return [];
-        return arr.filter(row => {
-          const val = Array.isArray(row) ? row[0] : row;
-          return val && val !== 'Nombre' && val !== 'Item';
-        });
-      };
-      allSuppliers = cleanData(response.data.suppliers);
-      allItems = cleanData(response.data.items);
-      console.log(`✅ Sincronizado: ${allSuppliers.length} proveedores, ${allItems.length} items`);
+    if (response.data && response.data.master) {
+      masterData = response.data.master;
+      console.log(`✅ Sincronizado: ${masterData.length} proveedores desde MAESTRO`);
       return true;
     }
   } catch (error) {
@@ -44,31 +35,23 @@ const purchaseWizard = new Scenes.WizardScene(
   // 1. Category
   async (ctx) => {
     ctx.wizard.state.purchase = {};
-    const keyboard = chunk(categories, 2);
-    await ctx.reply('📂 Selecciona una CATEGORIA:', Markup.keyboard(keyboard).oneTime().resize());
+    await ctx.reply('📂 Selecciona una CATEGORIA:', Markup.keyboard(chunk(categories, 2)).oneTime().resize());
     return ctx.wizard.next();
   },
-  // 2. Supplier
+  // 2. Supplier (Filtered by Category from MAESTRO Column B)
   async (ctx) => {
-    const text = ctx.message?.text;
-    if (!text || text.startsWith('/')) {
-      await ctx.scene.leave();
-      return; 
-    }
-    
-    const selectedCategory = text;
+    const selectedCategory = ctx.message?.text;
+    if (!selectedCategory || selectedCategory.startsWith('/')) return ctx.scene.leave();
     ctx.wizard.state.purchase.category = selectedCategory;
     
-    const filteredSuppliers = allSuppliers
-      .filter(s => {
-        const cat = Array.isArray(s) ? s[1] : null;
-        if (!cat) return true;
-        const itemCategories = cat.toString().split(',').map(c => c.trim().toLowerCase());
-        return itemCategories.includes(selectedCategory.toLowerCase());
+    const filteredSuppliers = masterData
+      .filter(row => {
+        const catValue = row[1] ? row[1].toString().toLowerCase() : '';
+        return catValue.split(',').map(c => c.trim()).includes(selectedCategory.toLowerCase());
       })
-      .map(s => Array.isArray(s) ? s[0] : s);
+      .map(row => row[0]);
 
-    const uniqueSuppliers = [...new Set(filteredSuppliers)];
+    const uniqueSuppliers = [...new Set(filteredSuppliers)].filter(Boolean);
     if (uniqueSuppliers.length === 0) {
       await ctx.reply(`❌ No hay proveedores para "${selectedCategory}".`);
       return ctx.scene.leave();
@@ -76,39 +59,33 @@ const purchaseWizard = new Scenes.WizardScene(
     await ctx.reply(`🏭 Selecciona el PROVEEDOR:`, Markup.keyboard(chunk(uniqueSuppliers, 2)).oneTime().resize());
     return ctx.wizard.next();
   },
-  // 3. Item
+  // 3. Item (Filtered by Supplier from MAESTRO Column C)
   async (ctx) => {
-    const text = ctx.message?.text;
-    if (!text || text.startsWith('/')) {
-      await ctx.scene.leave();
-      return;
-    }
-    
-    const supplier = text;
-    ctx.wizard.state.purchase.supplier = supplier;
+    const selectedSupplier = ctx.message?.text;
+    if (!selectedSupplier || selectedSupplier.startsWith('/')) return ctx.scene.leave();
+    ctx.wizard.state.purchase.supplier = selectedSupplier;
 
-    const filteredItems = allItems
-      .filter(i => {
-        const prov = Array.isArray(i) ? i[1] : null;
-        if (!prov) return true;
-        return prov.toString().toLowerCase() === supplier.toLowerCase();
-      })
-      .map(i => Array.isArray(i) ? i[0] : i);
+    // Find all items for this supplier across all rows in MAESTRO
+    const items = [];
+    masterData.forEach(row => {
+      if (row[0] && row[0].toString().toLowerCase() === selectedSupplier.toLowerCase()) {
+        const rowItems = row[2] ? row[2].toString().split(',').map(i => i.trim()) : [];
+        items.push(...rowItems);
+      }
+    });
 
-    if (filteredItems.length === 0) {
-      await ctx.reply(`❌ No hay items para "${supplier}".`);
+    const uniqueItems = [...new Set(items)].filter(Boolean);
+    if (uniqueItems.length === 0) {
+      await ctx.reply(`❌ No hay items para "${selectedSupplier}".`);
       return ctx.scene.leave();
     }
-    await ctx.reply(`🍔 ¿Qué ITEM de ${supplier}?`, Markup.keyboard(chunk(filteredItems, 2)).oneTime().resize());
+    await ctx.reply(`🍔 ¿Qué ITEM de ${selectedSupplier}?`, Markup.keyboard(chunk(uniqueItems, 2)).oneTime().resize());
     return ctx.wizard.next();
   },
   // 4. Quantity
   async (ctx) => {
     const text = ctx.message?.text;
-    if (!text || text.startsWith('/')) {
-      await ctx.scene.leave();
-      return;
-    }
+    if (!text || text.startsWith('/')) return ctx.scene.leave();
     ctx.wizard.state.purchase.item = text;
     await ctx.reply('🔢 ¿CANTIDAD?');
     return ctx.wizard.next();
@@ -116,23 +93,17 @@ const purchaseWizard = new Scenes.WizardScene(
   // 5. Price
   async (ctx) => {
     const text = ctx.message?.text;
-    if (!text || text.startsWith('/')) {
-      await ctx.scene.leave();
-      return;
-    }
+    if (!text || text.startsWith('/')) return ctx.scene.leave();
     const input = text.replace(/[^0-9.,]/g, '').replace(',', '.');
     if (isNaN(input) || input === '') return ctx.reply('⚠️ Ingresa un NÚMERO.');
     ctx.wizard.state.purchase.quantity = input;
     await ctx.reply('💰 ¿PRECIO TOTAL por unidad?');
     return ctx.wizard.next();
   },
-  // 6. Confirm Step 1
+  // 6. Confirm
   async (ctx) => {
     const text = ctx.message?.text;
-    if (!text || text.startsWith('/')) {
-      await ctx.scene.leave();
-      return;
-    }
+    if (!text || text.startsWith('/')) return ctx.scene.leave();
     const input = text.replace(/[^0-9.,]/g, '').replace(',', '.');
     if (isNaN(input) || input === '') return ctx.reply('⚠️ Ingresa un NÚMERO.');
     ctx.wizard.state.purchase.price = input;
@@ -143,7 +114,7 @@ const purchaseWizard = new Scenes.WizardScene(
     );
     return ctx.wizard.next();
   },
-  // 7. Save to Sheets
+  // 7. Save
   async (ctx) => {
     const answer = ctx.message?.text;
     if (answer === '✅ SI') {
@@ -153,11 +124,10 @@ const purchaseWizard = new Scenes.WizardScene(
         await axios.post(APPS_SCRIPT_URL, data);
         await ctx.reply(`✅ Guardado: ${data.item} - $${data.price}`);
       } catch (e) {
-        console.error('Error saving:', e.message);
         await ctx.reply('❌ Error al guardar en Sheets.');
       }
     } else {
-      await ctx.reply('❌ Compra cancelada o comando recibido.', Markup.removeKeyboard());
+      await ctx.reply('❌ Compra cancelada.', Markup.removeKeyboard());
     }
     return ctx.scene.leave();
   }
@@ -167,23 +137,41 @@ const stage = new Scenes.Stage([purchaseWizard]);
 bot.use(session());
 bot.use(stage.middleware());
 
-// Global Commands (Handled after stage, but scene will exit if / is detected)
-bot.command('start', (ctx) => ctx.reply('👋 Usa /new para registrar o /sync para actualizar.'));
+bot.command('start', (ctx) => ctx.reply('👋 Usa /new para registrar o /sync para actualizar.', Markup.removeKeyboard()));
+
 bot.command('reset', async (ctx) => { 
   await ctx.scene?.leave(); 
-  await ctx.reply('🔄 Sesión reiniciada.'); 
+  await ctx.reply('🔄 Sesión reiniciada.', Markup.removeKeyboard()); 
 });
-bot.command('ping', (ctx) => ctx.reply('pong!'));
+
+bot.command('cancel', async (ctx) => { 
+  await ctx.scene?.leave(); 
+  await ctx.reply('❌ Acción cancelada.', Markup.removeKeyboard()); 
+});
+
 bot.command('new', (ctx) => ctx.scene.enter('PURCHASE_WIZARD'));
+
 bot.command('sync', async (ctx) => {
   const ok = await syncData();
-  ctx.reply(ok ? `✅ Sincronizado.` : '❌ Error.');
+  ctx.reply(ok ? `✅ Sincronizado desde MAESTRO.` : '❌ Error.', Markup.removeKeyboard());
 });
+
+const http = require('http');
+
+// ... existing code ...
 
 async function launch() {
   await syncData();
   await bot.launch();
-  console.log('🚀 Bot iniciado');
+  console.log('🚀 Bot iniciado (Modo MAESTRO)');
+
+  // Simple health-check server for hosting platforms
+  const port = process.env.PORT || 3000;
+  http.createServer((req, res) => {
+    res.writeHead(200);
+    res.end('Bot is running!');
+  }).listen(port);
+  console.log(`📡 Health-check server listening on port ${port}`);
 }
 
 launch().catch(err => console.error('❌ Error fatal:', err));

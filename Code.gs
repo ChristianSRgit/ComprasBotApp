@@ -1,44 +1,39 @@
 const SPREADSHEET_ID = '1CckA7GkvDRk7QAG1yNJ1KuXTmzDD4L6y-VR_tgOpHrs';
 
 /**
- * GET handler: Returns current lists for the Bot with relations
+ * GET handler: Returns data from the MAESTRO tab
  */
 function doGet(e) {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  
-  const suppliers = getRowsData(ss, 'proveedores'); // [[Name, Category], ...]
-  const items = getRowsData(ss, 'items');           // [[Name, Supplier], ...]
-  
-  const categories = ['Carne', 'verduleria', 'panaderia', 'lacteos', 'congelados', 'aderezos', 'packaging', 'grafica', 'marketing', 'publicidad', 'envios', 'insumos_cocina', 'limpieza', 'Luz', 'Agua', 'Gas', 'Internet', 'ServicioExterno', 'Online', 'Otros'];
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName('MAESTRO');
+    
+    let masterData = [];
+    if (sheet && sheet.getLastRow() > 1) {
+      masterData = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
+    }
 
-  return success({
-    categories,
-    suppliers,
-    items
-  });
+    const categories = ['Carne', 'verduleria', 'panaderia', 'lacteos', 'congelados', 'aderezos', 'packaging', 'grafica', 'marketing', 'publicidad', 'envios', 'insumos_cocina', 'limpieza', 'Luz', 'Agua', 'Gas', 'Internet', 'ServicioExterno', 'Online', 'Otros'];
+
+    return success({
+      categories,
+      master: masterData // [[Nombre, Categoria, Items], ...]
+    });
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
 }
 
 /**
- * POST handler: Handles recording purchases or adding new metadata
+ * POST handler: Handles recording purchases
  */
 function doPost(e) {
   try {
     const data = JSON.parse(e.postData.contents);
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     
-    if (data.action === 'add_supplier') {
-      const sheet = getOrCreateSheet(ss, 'proveedores');
-      sheet.appendRow([data.name, data.category]); 
-      return success({ message: 'Supplier added' });
-    }
-    
-    if (data.action === 'add_item') {
-      const sheet = getOrCreateSheet(ss, 'items');
-      sheet.appendRow([data.name, data.supplier]);
-      return success({ message: 'Item added' });
-    }
-
-    // Default: Record Purchase
+    // Default: Record Purchase in COMPRASbot
     const sheet = getOrCreateSheet(ss, 'COMPRASbot');
     if (sheet.getLastRow() === 0) {
       sheet.appendRow(['Fecha', 'Categoria', 'Proveedor', 'Item', 'Cantidad', 'Precio', 'Subtotal']);
@@ -46,7 +41,6 @@ function doPost(e) {
 
     const argentinaDate = Utilities.formatDate(new Date(), "GMT-3", "dd/MM/yyyy");
     
-    // Ensure numbers for correct formatting in Sheets
     const qty = parseFloat(data.quantity) || 0;
     const price = parseFloat(data.price) || 0;
     const subtotal = qty * price;
@@ -70,14 +64,6 @@ function doPost(e) {
 }
 
 // --- Helpers ---
-
-function getRowsData(ss, name) {
-  const sheet = ss.getSheetByName(name);
-  if (!sheet) return [];
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 1) return [];
-  return sheet.getRange(1, 1, lastRow, 2).getValues();
-}
 
 function getOrCreateSheet(ss, name) {
   let sheet = ss.getSheetByName(name);
