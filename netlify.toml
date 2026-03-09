@@ -1,0 +1,7 @@
+[[redirects]]
+  from = "/*"
+  to = "/.netlify/functions/bot"
+  status = 200
+
+[functions]
+  directory = "netlify/functions"
