@@ -4,13 +4,11 @@
   "description": "Telegram bot for Smash purchase tracking - Netlify version",
   "main": "netlify/functions/bot.js",
   "scripts": {
-    "start": "node bot.js",
     "dev": "netlify dev"
   },
   "dependencies": {
     "telegraf": "^4.16.3",
     "axios": "^1.6.7",
-    "dotenv": "^16.4.5",
-    "telegraf-session-local": "^2.1.1"
+    "dotenv": "^16.4.5"
   }
 }
